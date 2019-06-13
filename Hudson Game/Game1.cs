@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Net.Mime;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework.Input;
@@ -9,20 +10,28 @@ namespace Hudson_Game
 {
     public class Game1 : Game
     {
-        GraphicsDeviceManager _graphics;
-        SpriteBatch _spriteBatch;
-        Texture2D _playZoneTexture;
+        private GraphicsDeviceManager _graphics;
+        private SpriteBatch _spriteBatch;
+        private Texture2D _playZoneTexture;
 
         private Level _level;
         private Camera _camera;
         private Texture2D _playerTexture;
         private Player _player;
-        private bool _keyDownRecorded;
+
+        private Texture2D _quizBackground;
+        private Quiz _quiz;
+        
+        private bool _enterKeyDownRecorded;
+        private bool _plusKeyDownRecorded;
+
+        private GameState _gameState;
 
         public event EventHandler ContentLoaded;
 
         public Game1()
         {
+            _gameState = GameState.Loading;
             _graphics = new GraphicsDeviceManager(this);
             Content.RootDirectory = "Content";
             IsMouseVisible = true;
@@ -31,21 +40,37 @@ namespace Hudson_Game
             _graphics.PreferredBackBufferHeight = 768;
             _graphics.ApplyChanges();
             
-            ContentLoaded += UseContent;
+            ContentLoaded += InitialLoad;
         }
 
-        private void UseContent(object sender, EventArgs e)
+        private void InitialLoad(object sender, EventArgs e)
+        {
+            ContentLoaded -= InitialLoad;
+            LoadLevel();
+        }
+
+        private void LoadLevel()
         {
             _level = new Level(_playZoneTexture, new Rectangle(100, 100, 800, 800));
-            _player = new Player(_playerTexture, _playerTexture, _playerTexture, _playerTexture, 1, 1, new Vector2(400, 400));
-            _camera.Target = _player;
+            _player = new Player(_playerTexture, _playerTexture, _playerTexture, _playerTexture, 1, 1, 1, new Vector2(400, 400));
+            _camera = new Camera(new Vector2(400, 400), _player);
+
+            _enterKeyDownRecorded = false;
+
+            _gameState = GameState.Game;
+        }
+
+        private void LoadQuiz()
+        {
+            _quiz = new Quiz(_quizBackground);
+
+            _gameState = GameState.Quiz;
         }
 
         protected override void Initialize()
         {
             // TODO: Add your initialization logic here
-            _camera = new Camera(new Vector2(400, 400), null);
-            _keyDownRecorded = false;
+            _plusKeyDownRecorded = false;
 
             base.Initialize();
         }
@@ -57,7 +82,7 @@ namespace Hudson_Game
             // TODO: use this.Content to load your game content here
             _playZoneTexture = Content.Load<Texture2D>("playzone");
             
-            _playerTexture = new Texture2D(GraphicsDevice, 80, 80);
+            /*_playerTexture = new Texture2D(GraphicsDevice, 80, 80);
             
             var data = new Color[80 * 80];
             for (int i = 0; i < 80; i++)
@@ -71,7 +96,17 @@ namespace Hudson_Game
                 }
             }
             
-            _playerTexture.SetData(data);
+            _playerTexture.SetData(data);*/
+
+            _playerTexture = Content.Load<Texture2D>("Hudson Sprites/Standing_scaled");
+            _quizBackground = new Texture2D(GraphicsDevice, 500, 500);
+            
+            var data = new Color[500 * 500];
+            for (int i = 0; i < 500 * 500; i++)
+            {
+                data[i] = Color.IndianRed;
+            }
+            _quizBackground.SetData(data);
 
             OnContentLoaded();
         }
@@ -83,49 +118,81 @@ namespace Hudson_Game
                 Exit();
 
             // TODO: Add your update logic here
-            var moveVector = Vector2.Zero;
+
+            switch (_gameState)
+            {
+                case GameState.Game:
+                    var moveVector = Vector2.Zero;
             
-            if (Keyboard.GetState().IsKeyDown(Keys.W)) moveVector += -Vector2.UnitY;
-            if (Keyboard.GetState().IsKeyDown(Keys.S)) moveVector += Vector2.UnitY;
-            if (Keyboard.GetState().IsKeyDown(Keys.A)) moveVector += -Vector2.UnitX;
-            if (Keyboard.GetState().IsKeyDown(Keys.D)) moveVector += Vector2.UnitX;
+                    if (Keyboard.GetState().IsKeyDown(Keys.W)) moveVector += -Vector2.UnitY;
+                    if (Keyboard.GetState().IsKeyDown(Keys.S)) moveVector += Vector2.UnitY;
+                    if (Keyboard.GetState().IsKeyDown(Keys.A)) moveVector += -Vector2.UnitX;
+                    if (Keyboard.GetState().IsKeyDown(Keys.D)) moveVector += Vector2.UnitX;
 
-            if (!_keyDownRecorded && Keyboard.GetState().IsKeyDown(Keys.Enter))
-            {
-                _keyDownRecorded = true;
-                if (_camera.CameraState == CameraState.Free)
-                    _camera.CameraState = CameraState.Locked;
-                else
-                    _camera.CameraState = CameraState.Free;
-            }
-            else if (_keyDownRecorded && Keyboard.GetState().IsKeyUp(Keys.Enter))
-            {
-                _keyDownRecorded = false;
-            }
+                    if (!_enterKeyDownRecorded && Keyboard.GetState().IsKeyDown(Keys.Enter))
+                    {
+                        _enterKeyDownRecorded = true;
+                        if (_camera.CameraState == CameraState.Free)
+                            _camera.CameraState = CameraState.Locked;
+                        else
+                            _camera.CameraState = CameraState.Free;
+                    }
+                    else if (_enterKeyDownRecorded && Keyboard.GetState().IsKeyUp(Keys.Enter))
+                    {
+                        _enterKeyDownRecorded = false;
+                    }
 
-            if (moveVector != Vector2.Zero)
-            {
-                switch (_camera.CameraState)
-                {
-                    case CameraState.Free:
-                        _camera.Move(Vector2.Normalize(moveVector) * 100f, gameTime);
-                        break;
+                    if (!_plusKeyDownRecorded && Keyboard.GetState().IsKeyDown(Keys.OemPlus))
+                    {
+                        _plusKeyDownRecorded = true;
+                        LoadQuiz();
+                    }
+                    else if (_plusKeyDownRecorded && Keyboard.GetState().IsKeyUp(Keys.OemPlus))
+                    {
+                        _plusKeyDownRecorded = false;
+                    }
                     
-                    case CameraState.Locked:
-                        _player.Move(Vector2.Normalize(moveVector) * 100f, gameTime);
-                        break;
+                    if (moveVector != Vector2.Zero)
+                    {
+                        switch (_camera.CameraState)
+                        {
+                            case CameraState.Free:
+                                _camera.Move(Vector2.Normalize(moveVector) * 100f, gameTime);
+                                break;
                     
-                    case CameraState.Chase:
-                        break;
+                            case CameraState.Locked:
+                                _player.Move(Vector2.Normalize(moveVector) * 100f, gameTime);
+                                break;
                     
-                    default:
-                        throw new ArgumentOutOfRangeException();
-                }
-            }
+                            case CameraState.Chase:
+                                break;
+                    
+                            default:
+                                throw new ArgumentOutOfRangeException();
+                        }
+                    }
             
-            _camera.Update(gameTime);
+                    _camera.Update(gameTime);
 
-            base.Update(gameTime);
+                    base.Update(gameTime);
+                    break;
+                
+                case GameState.Quiz:
+
+                    if (!_plusKeyDownRecorded && Keyboard.GetState().IsKeyDown(Keys.OemPlus))
+                    {
+                        _plusKeyDownRecorded = true;
+                        LoadLevel();
+                    }
+                    else if (_plusKeyDownRecorded && Keyboard.GetState().IsKeyUp(Keys.OemPlus))
+                    {
+                        _plusKeyDownRecorded = false;
+                    }
+                    break;
+                
+                default:
+                    throw new ArgumentOutOfRangeException();
+            }
         }
 
         protected override void Draw(GameTime gameTime)
@@ -133,16 +200,33 @@ namespace Hudson_Game
             GraphicsDevice.Clear(Color.CornflowerBlue);
 
             // TODO: Add your drawing code here
-            _spriteBatch.Begin();
-            _spriteBatch.Draw(_level.Texture,
-                new Vector2(_graphics.PreferredBackBufferWidth / 2f - _camera.Position.X - _level.PlayZone.X,
-                    _graphics.PreferredBackBufferHeight / 2f - _camera.Position.Y - _level.PlayZone.Y));
-            _spriteBatch.Draw(_player.Standing,
-                new Vector2(_graphics.PreferredBackBufferWidth / 2f + _player.Position.X - _camera.Position.X,
-                    _graphics.PreferredBackBufferHeight / 2f + _player.Position.Y - _camera.Position.Y), null,
-                Color.White, 0f, new Vector2(_player.Standing.Width / 2f, _player.Standing.Height / 2f), 1f,
-                SpriteEffects.None, 0);
-            _spriteBatch.End();
+            switch (_gameState)
+            {
+                case GameState.Loading:
+                    break;
+
+                case GameState.Game:
+                    _spriteBatch.Begin();
+                    _spriteBatch.Draw(_level.Texture,
+                        new Vector2(_graphics.PreferredBackBufferWidth / 2f - _camera.Position.X - _level.PlayZone.X,
+                            _graphics.PreferredBackBufferHeight / 2f - _camera.Position.Y - _level.PlayZone.Y));
+                    _spriteBatch.Draw(_player.Standing,
+                        new Vector2(_graphics.PreferredBackBufferWidth / 2f + _player.Position.X - _camera.Position.X,
+                            _graphics.PreferredBackBufferHeight / 2f + _player.Position.Y - _camera.Position.Y), null,
+                        Color.White, 0f, new Vector2(_player.Standing.Width / 2f, _player.Standing.Height / 2f), 1f,
+                        SpriteEffects.None, 0);
+                    _spriteBatch.End();
+                    break;
+                
+                case GameState.Quiz:
+                    _spriteBatch.Begin();
+                    _spriteBatch.Draw(_quiz.Texture, Vector2.Zero);
+                    _spriteBatch.End();
+                    break;
+                
+                default:
+                    throw new ArgumentOutOfRangeException();
+            }
 
             base.Draw(gameTime);
         }

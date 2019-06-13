@@ -40,8 +40,9 @@ namespace Hudson_Game
             public Texture2D Running { get; }
             public Texture2D Stopping { get; }
 
-            private int _startingFrames;
-            private int _runningFrames;
+            private readonly int _startingFrames;
+            private readonly int _runningFrames;
+            private readonly int _stoppingFrames;
 
             public Vector2 Position { get; private set; }
             public Vector2 Direction { get; private set; }
@@ -49,7 +50,7 @@ namespace Hudson_Game
             public PlayerState PlayerState { get; private set; }
             public int Frame { get; private set; }
 
-            public Player(Texture2D standing, Texture2D starting, Texture2D running, Texture2D stopping, int startingFrames, int runningFrames, Vector2 position)
+            public Player(Texture2D standing, Texture2D starting, Texture2D running, Texture2D stopping, int startingFrames, int runningFrames, int stoppingFrames, Vector2 position)
             {
                 Standing = standing;
                 Starting = starting;
@@ -57,6 +58,7 @@ namespace Hudson_Game
                 Stopping = stopping;
                 _startingFrames = startingFrames;
                 _runningFrames = runningFrames;
+                _stoppingFrames = stoppingFrames;
                 Position = position;
 
                 PlayerState = PlayerState.Standing;
@@ -105,6 +107,16 @@ namespace Hudson_Game
                 }
             }
         }
+        
+        public class Quiz
+        {
+            public Texture2D Texture { get; }
+
+            public Quiz(Texture2D texture)
+            {
+                Texture = texture;
+            }
+        }
 
         public enum PlayerState
         {
@@ -119,6 +131,13 @@ namespace Hudson_Game
             Free = 0,
             Locked = 1,
             Chase = 2
+        }
+
+        public enum GameState
+        {
+            Loading = 0,
+            Game = 1,
+            Quiz = 2
         }
     }
 }
