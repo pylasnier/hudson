@@ -12,14 +12,14 @@ namespace Hudson_Game
     {
         private GraphicsDeviceManager _graphics;
         private SpriteBatch _spriteBatch;
-        private Texture2D _playZoneTexture;
+        //private Texture2D _playZoneTexture;
 
         private Level _level;
         private Camera _camera;
-        private Texture2D _playerTexture;
+        //private Texture2D _playerTexture;
         private Player _player;
 
-        private Texture2D _quizBackground;
+        //private Texture2D _quizBackground;
         private Quiz _quiz;
         
         private bool _enterKeyDownRecorded;
@@ -51,8 +51,11 @@ namespace Hudson_Game
 
         private void LoadLevel()
         {
-            _level = new Level(_playZoneTexture, new Rectangle(100, 100, 800, 800));
-            _player = new Player(_playerTexture, _playerTexture, _playerTexture, _playerTexture, 1, 1, 1, new Vector2(400, 400));
+            var texture = Content.Load<Texture2D>("Hudson Sprites/Standing_scaled");
+            _player = new Player(texture, texture, texture, texture, 1, 1, 1, new Vector2(400, 400));
+
+            texture = Content.Load<Texture2D>("playzone");
+            _level = new Level(texture, new Rectangle(100, 100, 800, 800));
             _camera = new Camera(new Vector2(400, 400), _player);
 
             _enterKeyDownRecorded = false;
@@ -62,7 +65,15 @@ namespace Hudson_Game
 
         private void LoadQuiz()
         {
-            _quiz = new Quiz(_quizBackground);
+            var data = new Color[500 * 500];
+            for (int i = 0; i < 500 * 500; i++)
+            {
+                data[i] = Color.IndianRed;
+            }
+            var texture = new Texture2D(GraphicsDevice, 500, 500);
+            texture.SetData(data);
+            
+            _quiz = new Quiz(texture);
 
             _gameState = GameState.Quiz;
         }
@@ -70,7 +81,6 @@ namespace Hudson_Game
         protected override void Initialize()
         {
             // TODO: Add your initialization logic here
-            _plusKeyDownRecorded = false;
 
             base.Initialize();
         }
@@ -80,33 +90,6 @@ namespace Hudson_Game
             _spriteBatch = new SpriteBatch(GraphicsDevice);
 
             // TODO: use this.Content to load your game content here
-            _playZoneTexture = Content.Load<Texture2D>("playzone");
-            
-            /*_playerTexture = new Texture2D(GraphicsDevice, 80, 80);
-            
-            var data = new Color[80 * 80];
-            for (int i = 0; i < 80; i++)
-            {
-                for (int j = 0; j < 80; j++)
-                {
-                    if ((i - 40) * (i - 40) + (j - 40) * (j - 40) <= 40 * 40)
-                        data[80 * i + j] = Color.Blue;
-                    else
-                        data[80 * i + j] = Color.Transparent;
-                }
-            }
-            
-            _playerTexture.SetData(data);*/
-
-            _playerTexture = Content.Load<Texture2D>("Hudson Sprites/Standing_scaled");
-            _quizBackground = new Texture2D(GraphicsDevice, 500, 500);
-            
-            var data = new Color[500 * 500];
-            for (int i = 0; i < 500 * 500; i++)
-            {
-                data[i] = Color.IndianRed;
-            }
-            _quizBackground.SetData(data);
 
             OnContentLoaded();
         }

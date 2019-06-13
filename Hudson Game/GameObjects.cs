@@ -44,7 +44,7 @@ namespace Hudson_Game
             private readonly int _runningFrames;
             private readonly int _stoppingFrames;
 
-            public Vector2 Position { get; private set; }
+            public Vector2 Position { get; internal set; }
             public Vector2 Direction { get; private set; }
 
             public PlayerState PlayerState { get; private set; }
