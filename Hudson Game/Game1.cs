@@ -52,11 +52,21 @@ namespace Hudson_Game
         private void LoadLevel()
         {
             var texture = Content.Load<Texture2D>("Hudson Sprites/Standing_scaled");
-            _player = new Player(texture, texture, texture, texture, 1, 1, 1, new Vector2(400, 400));
+            _player = new Player(texture, texture, texture, texture, new Rectangle(8, 8, 48, 48),  1, 1, 1, new Vector2(400, 400));
 
             texture = Content.Load<Texture2D>("playzone");
-            _level = new Level(texture, new Rectangle(100, 100, 800, 800));
             _camera = new Camera(new Vector2(400, 400), _player);
+
+            var data = new Color[100 * 100];
+            for (int i = 0; i < 100 * 100; i++)
+            {
+                data[i] = Color.Green;
+            }
+            var tTexture = new Texture2D(GraphicsDevice, 100, 100);
+            tTexture.SetData(data);
+
+            _level = new Level(texture, new Rectangle(100, 100, 800, 800), _player, _camera,
+                new[] {new EnvironmentObject(tTexture, new Vector2(50, 80), true, new Rectangle(0, 0, 100, 100))});
 
             _enterKeyDownRecorded = false;
 
@@ -154,8 +164,10 @@ namespace Hudson_Game
                                 throw new ArgumentOutOfRangeException();
                         }
                     }
+
+                    _level.Update(gameTime);
             
-                    _camera.Update(gameTime);
+                    //_camera.Update(gameTime);
 
                     base.Update(gameTime);
                     break;
@@ -191,13 +203,22 @@ namespace Hudson_Game
                 case GameState.Game:
                     _spriteBatch.Begin();
                     _spriteBatch.Draw(_level.Texture,
-                        new Vector2(_graphics.PreferredBackBufferWidth / 2f - _camera.Position.X - _level.PlayZone.X,
-                            _graphics.PreferredBackBufferHeight / 2f - _camera.Position.Y - _level.PlayZone.Y));
+                        new Vector2(_graphics.PreferredBackBufferWidth / 2f - _camera.Position.X - _level.PlayZone.Left,
+                            _graphics.PreferredBackBufferHeight / 2f - _camera.Position.Y - _level.PlayZone.Top));
+                    if (_level.EnvironmentObjects != null)
+                    {
+                        foreach (var environmentObject in _level.EnvironmentObjects)
+                        {
+                            _spriteBatch.Draw(environmentObject.Texture,
+                                new Vector2(
+                                    _graphics.PreferredBackBufferWidth / 2f + environmentObject.Position.X - _camera.Position.X,
+                                    _graphics.PreferredBackBufferHeight / 2f + environmentObject.Position.Y -
+                                    _camera.Position.Y));
+                        }
+                    }
                     _spriteBatch.Draw(_player.Standing,
                         new Vector2(_graphics.PreferredBackBufferWidth / 2f + _player.Position.X - _camera.Position.X,
-                            _graphics.PreferredBackBufferHeight / 2f + _player.Position.Y - _camera.Position.Y), null,
-                        Color.White, 0f, new Vector2(_player.Standing.Width / 2f, _player.Standing.Height / 2f), 1f,
-                        SpriteEffects.None, 0);
+                            _graphics.PreferredBackBufferHeight / 2f + _player.Position.Y - _camera.Position.Y));
                     _spriteBatch.End();
                     break;
                 
