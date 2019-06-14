@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Net.Mime;
+using System.Threading;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework.Input;
@@ -27,6 +28,8 @@ namespace Hudson_Game
 
         private GameState _gameState;
 
+        private Timer frameAdvance;
+
         public event EventHandler ContentLoaded;
 
         public Game1()
@@ -51,10 +54,11 @@ namespace Hudson_Game
 
         private void LoadLevel()
         {
-            var texture = Content.Load<Texture2D>("Hudson Sprites/Standing_scaled");
-            _player = new Player(texture, texture, texture, texture, new Rectangle(8, 8, 48, 48),  1, 1, 1, new Vector2(400, 400));
+            var standing = Content.Load<Texture2D>("Hudson Sprites/Standing_scaled");
+            var running = Content.Load<Texture2D>("Hudson Sprites/Running");
+            _player = new Player(standing, standing, running, standing, new Rectangle(8, 8, 48, 48),  1, 16, 1, new Vector2(400, 400));
 
-            texture = Content.Load<Texture2D>("playzone");
+            var texture = Content.Load<Texture2D>("playzone");
             _camera = new Camera(new Vector2(400, 400), _player);
 
             var data = new Color[100 * 100];
@@ -71,6 +75,7 @@ namespace Hudson_Game
             _enterKeyDownRecorded = false;
 
             _gameState = GameState.Game;
+            frameAdvance = new Timer(_player.FrameAdvance, null, 10, 1000 / 24);
         }
 
         private void LoadQuiz()
@@ -122,7 +127,7 @@ namespace Hudson_Game
                     if (Keyboard.GetState().IsKeyDown(Keys.A)) moveVector += -Vector2.UnitX;
                     if (Keyboard.GetState().IsKeyDown(Keys.D)) moveVector += Vector2.UnitX;
 
-                    if (!_enterKeyDownRecorded && Keyboard.GetState().IsKeyDown(Keys.Enter))
+                    /*if (!_enterKeyDownRecorded && Keyboard.GetState().IsKeyDown(Keys.Enter))
                     {
                         _enterKeyDownRecorded = true;
                         if (_camera.CameraState == CameraState.Free)
@@ -163,10 +168,9 @@ namespace Hudson_Game
                             default:
                                 throw new ArgumentOutOfRangeException();
                         }
-                    }
+                    }*/
 
-                    _level.Update(gameTime);
-            
+                    _level.Update(gameTime, Keyboard.GetState());
                     //_camera.Update(gameTime);
 
                     base.Update(gameTime);
@@ -216,7 +220,7 @@ namespace Hudson_Game
                                     _camera.Position.Y));
                         }
                     }
-                    _spriteBatch.Draw(_player.Standing,
+                    _spriteBatch.Draw(_player.CurrentFrame,
                         new Vector2(_graphics.PreferredBackBufferWidth / 2f + _player.Position.X - _camera.Position.X,
                             _graphics.PreferredBackBufferHeight / 2f + _player.Position.Y - _camera.Position.Y));
                     _spriteBatch.End();

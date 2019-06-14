@@ -1,6 +1,7 @@
 using System;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
+using Microsoft.Xna.Framework.Input;
 
 namespace Hudson_Game
 {
@@ -33,11 +34,11 @@ namespace Hudson_Game
                 _lastValidCameraPosition = Camera.Position;
             }
 
-            public void Update(GameTime gameTime)
+            public void Update(GameTime gameTime, KeyboardState keyboardState)
             {
                 var collided = false;
                 
-                //Player.Update();
+                Player.Update(gameTime, keyboardState);
 
                 if (Player.Position.X + Player.Hitbox.Right > PlayZone.Width ||
                     Player.Position.X + Player.Hitbox.Left < 0 ||
@@ -99,10 +100,10 @@ namespace Hudson_Game
 
         public class Player
         {
-            public Texture2D Standing { get; }
-            public Texture2D Starting { get; }
-            public Texture2D Running { get; }
-            public Texture2D Stopping { get; }
+            private readonly Texture2D _standing;
+            private readonly Texture2D _starting;
+            private readonly Texture2D _running;
+            private readonly Texture2D _stopping;
             public Rectangle Hitbox { get; }
 
             private readonly int _startingFrames;
@@ -113,14 +114,17 @@ namespace Hudson_Game
             public Vector2 Direction { get; private set; }
 
             public PlayerState PlayerState { get; private set; }
-            public int Frame { get; private set; }
+            public Texture2D CurrentFrame => GetFrame();
+
+            private KeyboardState _keyboardState;
+            private int _frame;
 
             public Player(Texture2D standing, Texture2D starting, Texture2D running, Texture2D stopping, Rectangle hitbox, int startingFrames, int runningFrames, int stoppingFrames, Vector2 position)
             {
-                Standing = standing;
-                Starting = starting;
-                Running = running;
-                Stopping = stopping;
+                _standing = standing;
+                _starting = starting;
+                _running = running;
+                _stopping = stopping;
                 Hitbox = hitbox;
                 _startingFrames = startingFrames;
                 _runningFrames = runningFrames;
@@ -129,22 +133,107 @@ namespace Hudson_Game
 
                 PlayerState = PlayerState.Standing;
                 Direction = -Vector2.UnitY;
-                Frame = 0;
+                _frame = 0;
             }
 
-            public void Move(Vector2 moveVector, GameTime gameTime)
+            public void Update(GameTime gameTime, KeyboardState keyboardState)
             {
-                Position += moveVector * (float) gameTime.ElapsedGameTime.TotalSeconds;
+                Position += Direction * (float) gameTime.ElapsedGameTime.TotalSeconds;
+                _keyboardState = keyboardState;
             }
 
-            public void Update()
+            public void FrameAdvance(object stateInfo)
             {
-                throw new System.NotImplementedException();
+                if (_keyboardState.IsKeyDown(Keys.W))
+                {
+                    if (PlayerState == PlayerState.Standing)
+                    {
+                        PlayerState = PlayerState.Starting;
+                        _frame = 0;
+                    }
+                    else if (PlayerState == PlayerState.Starting)
+                    {
+                        if (_frame < _startingFrames)
+                        {
+                            _frame++;
+                        }
+                        else
+                        {
+                            PlayerState = PlayerState.Running;
+                            _frame = 0;
+                            Direction = -Vector2.UnitY;
+                        }
+                    }
+                    else if (PlayerState == PlayerState.Running)
+                    {
+                        _frame++;
+                        _frame %= _runningFrames;
+                    }
+                }
+                if (_keyboardState.IsKeyUp(Keys.W))
+                {
+                    if (PlayerState == PlayerState.Starting)
+                    {
+                        PlayerState = PlayerState.Standing;
+                        _frame = 0;
+                    }
+                    else if (PlayerState == PlayerState.Running)
+                    {
+                        PlayerState = PlayerState.Stopping;
+                        _frame = 0;
+                    }
+                    else if (PlayerState == PlayerState.Stopping)
+                    {
+                        if (_frame < _stoppingFrames)
+                        {
+                            _frame++;
+                        }
+                        else
+                        {
+                            PlayerState = PlayerState.Standing;
+                            Direction = Vector2.Zero;
+                            _frame = 0;
+                        }
+                    }
+                }
             }
 
             public void SetLevel(Level level)
             {
                 level.Collided += Collided;
+            }
+
+            public Texture2D GetFrame()
+            {
+                Texture2D texture;
+                
+                switch (PlayerState)
+                {
+                    case PlayerState.Standing:
+                        texture = _standing;
+                        break;
+                    
+                    case PlayerState.Starting:
+                        texture = _standing;
+                        break;
+                    
+                    case PlayerState.Running:
+                        texture = new Texture2D(_running.GraphicsDevice, _standing.Width, _standing.Height);
+                        var data = new Color[_standing.Width * _standing.Height];
+                        var source = new Rectangle(0, _standing.Height * _frame, _standing.Width, _standing.Height);
+                        _running.GetData(0, source, data, 0, _standing.Width * _standing.Height);
+                        texture.SetData(data);
+                        break;
+                    
+                    case PlayerState.Stopping:
+                        texture = _standing;
+                        break;
+                    
+                    default:
+                        throw new ArgumentOutOfRangeException();
+                }
+
+                return texture;
             }
 
             private void Collided(object sender, CollisionEventArgs e)
