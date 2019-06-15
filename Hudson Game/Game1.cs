@@ -28,7 +28,7 @@ namespace Hudson_Game
 
         private GameState _gameState;
 
-        private Timer frameAdvance;
+        private Timer _tick;
 
         public event EventHandler ContentLoaded;
 
@@ -42,6 +42,9 @@ namespace Hudson_Game
             _graphics.PreferredBackBufferWidth = 1024;
             _graphics.PreferredBackBufferHeight = 768;
             _graphics.ApplyChanges();
+
+            IsFixedTimeStep = true;
+            TargetElapsedTime = TimeSpan.FromMilliseconds(1000 / 144);
             
             ContentLoaded += InitialLoad;
         }
@@ -56,7 +59,11 @@ namespace Hudson_Game
         {
             var standing = Content.Load<Texture2D>("Hudson Sprites/Standing_scaled");
             var running = Content.Load<Texture2D>("Hudson Sprites/Running");
-            _player = new Player(standing, standing, running, standing, new Rectangle(8, 8, 48, 48),  1, 16, 1, new Vector2(400, 400));
+            var starting = Content.Load <Texture2D>("Hudson Sprites/Starting");
+            var stopping = Content.Load<Texture2D>("Hudson Sprites/Stopping");
+            var hit = Content.Load<Texture2D>("Hudson Sprites/Hit");
+            _player = new Player(standing, starting, running, stopping, hit, new Rectangle(8, 16, 48, 32), 5, 16, 8, 330,
+                new Vector2(400, 400));
 
             var texture = Content.Load<Texture2D>("playzone");
             _camera = new Camera(new Vector2(400, 400), _player);
@@ -75,7 +82,7 @@ namespace Hudson_Game
             _enterKeyDownRecorded = false;
 
             _gameState = GameState.Game;
-            frameAdvance = new Timer(_player.FrameAdvance, null, 10, 1000 / 24);
+            _tick = new Timer(_player.Tick, null, 10, 1000 / 24);
         }
 
         private void LoadQuiz()

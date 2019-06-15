@@ -100,100 +100,157 @@ namespace Hudson_Game
 
         public class Player
         {
+            public Vector2 Position { get; private set; }
+            public Rectangle Hitbox => GetHitbox();
+            public Texture2D CurrentFrame => GetFrame();
+            
             private readonly Texture2D _standing;
             private readonly Texture2D _starting;
             private readonly Texture2D _running;
             private readonly Texture2D _stopping;
-            public Rectangle Hitbox { get; }
-
+            private readonly Texture2D _hit;
+            
             private readonly int _startingFrames;
             private readonly int _runningFrames;
             private readonly int _stoppingFrames;
 
-            public Vector2 Position { get; private set; }
-            public Vector2 Direction { get; private set; }
-
-            public PlayerState PlayerState { get; private set; }
-            public Texture2D CurrentFrame => GetFrame();
-
+            private readonly float _runningSpeed;
+            private readonly float _acceleration;
+            private readonly float _deceleration;
+            
+            private Vector2 _direction = -Vector2.UnitX;
+            private float _speed; // Default 0 at initialisation
+            private PlayerState _playerState = PlayerState.Standing;
+            private Rectangle _hitbox;
             private KeyboardState _keyboardState;
-            private int _frame;
+            private int _frame; // Default 0 at initialisation
+            private int _delay; // Default 0 at initialisation
 
-            public Player(Texture2D standing, Texture2D starting, Texture2D running, Texture2D stopping, Rectangle hitbox, int startingFrames, int runningFrames, int stoppingFrames, Vector2 position)
+            public Player(Texture2D standing, Texture2D starting, Texture2D running, Texture2D stopping, Texture2D hit, Rectangle hitbox, int startingFrames, int runningFrames, int stoppingFrames, float runningSpeed, Vector2 position)
             {
                 _standing = standing;
                 _starting = starting;
                 _running = running;
                 _stopping = stopping;
-                Hitbox = hitbox;
+                _hit = hit;
+                _hitbox = hitbox;
                 _startingFrames = startingFrames;
                 _runningFrames = runningFrames;
                 _stoppingFrames = stoppingFrames;
+                _runningSpeed = runningSpeed;
+                _acceleration = runningSpeed / startingFrames;
+                _deceleration = runningSpeed / stoppingFrames;
                 Position = position;
-
-                PlayerState = PlayerState.Standing;
-                Direction = -Vector2.UnitY;
-                _frame = 0;
             }
 
             public void Update(GameTime gameTime, KeyboardState keyboardState)
             {
-                Position += Direction * (float) gameTime.ElapsedGameTime.TotalSeconds;
+                Position += _direction * _speed * (float) gameTime.ElapsedGameTime.TotalSeconds;
                 _keyboardState = keyboardState;
             }
 
-            public void FrameAdvance(object stateInfo)
+            public void Tick(object stateInfo)
             {
-                if (_keyboardState.IsKeyDown(Keys.W))
+                Vector2 moveVector;
+                
+                var w = _keyboardState.IsKeyDown(Keys.W);
+                var a = _keyboardState.IsKeyDown(Keys.A);
+                var s = _keyboardState.IsKeyDown(Keys.S);
+                var d = _keyboardState.IsKeyDown(Keys.D);
+
+                if (a ^ d)
                 {
-                    if (PlayerState == PlayerState.Standing)
-                    {
-                        PlayerState = PlayerState.Starting;
-                        _frame = 0;
-                    }
-                    else if (PlayerState == PlayerState.Starting)
-                    {
-                        if (_frame < _startingFrames)
-                        {
-                            _frame++;
-                        }
-                        else
-                        {
-                            PlayerState = PlayerState.Running;
-                            _frame = 0;
-                            Direction = -Vector2.UnitY;
-                        }
-                    }
-                    else if (PlayerState == PlayerState.Running)
+                    moveVector = new Vector2((d ? 1 : 0) - (a ? 1 : 0), 0);
+                }
+                else
+                {
+                    moveVector = new Vector2(0, (s ? 1 : 0) - (w ? 1 : 0));
+                }
+                
+                if (_playerState == PlayerState.Stopping)
+                {
+                    if (_frame < _stoppingFrames - 1)
                     {
                         _frame++;
-                        _frame %= _runningFrames;
+                        _speed -= _deceleration;
+                    }
+                    else
+                    {
+                        _playerState = PlayerState.Standing;
+                        _frame = 0;
+                        _speed = 0;
                     }
                 }
-                if (_keyboardState.IsKeyUp(Keys.W))
+
+                else if (moveVector != Vector2.Zero)
                 {
-                    if (PlayerState == PlayerState.Starting)
+                    if (_playerState == PlayerState.Standing)
                     {
-                        PlayerState = PlayerState.Standing;
+                        _playerState = PlayerState.Starting;
+                        _direction = moveVector;
                         _frame = 0;
                     }
-                    else if (PlayerState == PlayerState.Running)
+                    else if (_direction + moveVector == Vector2.Zero)
                     {
-                        PlayerState = PlayerState.Stopping;
-                        _frame = 0;
+                        if (_playerState == PlayerState.Starting)
+                        {
+                            _playerState = PlayerState.Standing;
+                            _speed = 0;
+                            _frame = 0;
+                        }
+                        else // _playerState == PlayerState.Running
+                        {
+                            _playerState = PlayerState.Stopping;
+                            _frame = 0;
+                        }
                     }
-                    else if (PlayerState == PlayerState.Stopping)
+                    else
                     {
-                        if (_frame < _stoppingFrames)
+                        _direction = moveVector;
+                        if (_playerState == PlayerState.Starting)
+                        {
+                            if (_frame < _startingFrames - 1)
+                            {
+                                _frame++;
+                                _speed += _acceleration;
+                            }
+                            else
+                            {
+                                _playerState = PlayerState.Running;
+                                _frame = 0;
+                                _delay = 0;
+                                _speed = _runningSpeed;
+                            }
+                        }
+                        else // _playerState == PlayerState.Running
                         {
                             _frame++;
+                            _frame %= _runningFrames;
+                        }
+                    }
+                }
+                
+                else
+                {
+                    if (_playerState == PlayerState.Running)
+                    {
+                        if (_delay < 3)
+                        {
+                            _delay++;
+                            _frame++;
+                            _frame %= _runningFrames;
                         }
                         else
                         {
-                            PlayerState = PlayerState.Standing;
-                            Direction = Vector2.Zero;
+                            _playerState = PlayerState.Stopping;
                             _frame = 0;
                         }
+                    }
+                    else
+                    {
+                        _playerState = PlayerState.Standing;
+                        _frame = 0;
+                        _speed = 0;
                     }
                 }
             }
@@ -205,35 +262,100 @@ namespace Hudson_Game
 
             public Texture2D GetFrame()
             {
+                Texture2D activeSprite;
                 Texture2D texture;
                 
-                switch (PlayerState)
+                switch (_playerState)
                 {
                     case PlayerState.Standing:
-                        texture = _standing;
+                        activeSprite = _standing;
                         break;
                     
                     case PlayerState.Starting:
-                        texture = _standing;
+                        activeSprite = _starting;
                         break;
                     
                     case PlayerState.Running:
-                        texture = new Texture2D(_running.GraphicsDevice, _standing.Width, _standing.Height);
-                        var data = new Color[_standing.Width * _standing.Height];
-                        var source = new Rectangle(0, _standing.Height * _frame, _standing.Width, _standing.Height);
-                        _running.GetData(0, source, data, 0, _standing.Width * _standing.Height);
-                        texture.SetData(data);
+                        activeSprite = _running;
                         break;
                     
                     case PlayerState.Stopping:
-                        texture = _standing;
+                        activeSprite = _stopping;
                         break;
                     
                     default:
                         throw new ArgumentOutOfRangeException();
                 }
 
+                var data = new Color[_standing.Width * _standing.Height];
+                var source = new Rectangle(0, _standing.Height * _frame, _standing.Width, _standing.Height);
+                
+                activeSprite.GetData(0, source, data, 0, _standing.Width * _standing.Height);
+
+                var rotatedData = new Color[_standing.Width * _standing.Height];
+                if (_direction == Vector2.UnitY) // Downwards
+                {
+                    texture = new Texture2D(activeSprite.GraphicsDevice, _standing.Width, _standing.Height);
+                    for (int i = 0; i < _standing.Width * _standing.Height; i++)
+                    {
+                        rotatedData[_standing.Width * _standing.Height - i - 1] = data[i];
+                    }
+                }
+                else if (_direction == Vector2.UnitX) // Right
+                {
+                    texture = new Texture2D(activeSprite.GraphicsDevice, _standing.Height, _standing.Width);
+                    for (int i = 0; i < _standing.Width; i++)
+                    {
+                        for (int j = 0; j < _standing.Height; j++)
+                        {
+                            rotatedData[i * _standing.Height + _standing.Width - j - 1] = data[j * _standing.Width + i];
+                        }
+                    }
+                }
+                else if (_direction == -Vector2.UnitX) // Left
+                {
+                    texture = new Texture2D(activeSprite.GraphicsDevice, _standing.Height, _standing.Width);
+                    for (int i = 0; i < _standing.Width; i++)
+                    {
+                        for (int j = 0; j < _standing.Height; j++)
+                        {
+                            rotatedData[(_standing.Height - i - 1) * _standing.Height + j] = data[j * _standing.Width + i];
+                        }
+                    }
+                }
+                else
+                {
+                    texture = new Texture2D(activeSprite.GraphicsDevice, _standing.Width, _standing.Height);
+                    rotatedData = data;
+                }
+                
+                texture.SetData(rotatedData);
+
                 return texture;
+            }
+
+            private Rectangle GetHitbox()
+            {
+                Rectangle hitbox;
+                
+                if (_direction == Vector2.UnitY) // Downwards
+                {
+                    hitbox = new Rectangle(_standing.Width - _hitbox.Right, _standing.Height - _hitbox.Bottom, _hitbox.Width, _hitbox.Height);
+                }
+                else if (_direction == Vector2.UnitX) // Right
+                {
+                    hitbox = new Rectangle(_standing.Height - _hitbox.Bottom, _hitbox.Left, _hitbox.Height, _hitbox.Width);
+                }
+                else if (_direction == -Vector2.UnitX) // Left
+                {
+                    hitbox = new Rectangle(_hitbox.Top, _standing.Width - _hitbox.Right, _hitbox.Height, _hitbox.Width);
+                }
+                else // Upwards (default)
+                {
+                    hitbox = _hitbox;
+                }
+
+                return hitbox;
             }
 
             private void Collided(object sender, CollisionEventArgs e)
