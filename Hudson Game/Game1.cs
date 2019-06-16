@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Net.Mime;
+using System.Text;
 using System.Threading;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
@@ -20,6 +21,8 @@ namespace Hudson_Game
         //private Texture2D _playerTexture;
         private Player _player;
 
+        private SpriteFont _spriteFont;
+
         //private Texture2D _quizBackground;
         private Quiz _quiz;
         
@@ -28,7 +31,10 @@ namespace Hudson_Game
 
         private GameState _gameState;
 
-        private Timer _tick;
+        private Timer _tick; // System.Threading.Timer
+
+        private int _lives;
+        private int _points;
 
         public event EventHandler ContentLoaded;
 
@@ -57,16 +63,19 @@ namespace Hudson_Game
 
         private void LoadLevel()
         {
+            _spriteFont = Content.Load<SpriteFont>("File");
+            
             var standing = Content.Load<Texture2D>("Hudson Sprites/Standing_scaled");
             var running = Content.Load<Texture2D>("Hudson Sprites/Running");
             var starting = Content.Load <Texture2D>("Hudson Sprites/Starting");
             var stopping = Content.Load<Texture2D>("Hudson Sprites/Stopping");
             var hit = Content.Load<Texture2D>("Hudson Sprites/Hit");
-            _player = new Player(standing, starting, running, stopping, hit, new Rectangle(8, 16, 48, 32), 5, 16, 8, 330,
-                new Vector2(400, 400));
+            _player = new Player(standing, starting, running, stopping, hit, new Rectangle(8, 16, 48, 32), 5, 16, 8, 20,
+                3, 330, 300, new Vector2(700, 700));
 
             var texture = Content.Load<Texture2D>("playzone");
             _camera = new Camera(new Vector2(400, 400), _player);
+            _camera.CameraState = CameraState.Locked;
 
             var data = new Color[100 * 100];
             for (int i = 0; i < 100 * 100; i++)
@@ -75,14 +84,45 @@ namespace Hudson_Game
             }
             var tTexture = new Texture2D(GraphicsDevice, 100, 100);
             tTexture.SetData(data);
+            
+            data = new Color[100 * 50];
+            for (int i = 0; i < 100 * 50; i++)
+            {
+                data[i] = Color.Blue;
+            }
+            var pretendCar = new Texture2D(GraphicsDevice, 100, 50);
+            pretendCar.SetData(data);
+            
+            var vehicleLane =
+                new VehicleLane(new Vehicle(pretendCar, new Rectangle(0, 0, 100, 50), 10000, HitType.Stick), 300, 1500,
+                    -500, 3000, 1000);
+            
+            data = new Color[20 * 20];
+            for (int i = 0; i < 20 * 20; i++)
+            {
+                data[i] = Color.Black;
+            }
+            var litterthing = new Texture2D(GraphicsDevice, 20, 20);
+            litterthing.SetData(data);
+            
+            var litter =
+                new Litter(litterthing, new Rectangle(0, 0, 20, 20), new Vector2(600, 600),  100);
+
 
             _level = new Level(texture, new Rectangle(100, 100, 800, 800), _player, _camera,
-                new[] {new EnvironmentObject(tTexture, new Vector2(50, 80), true, new Rectangle(0, 0, 100, 100))});
+                new[] {new EnvironmentObject(tTexture, new Vector2(50, 80), true, new Rectangle(0, 0, 100, 100))},
+                new[] {vehicleLane}, new[] {litter}, 3f);
 
-            _enterKeyDownRecorded = false;
+            _level.VehicleLanes[0].BeginSpawning();
 
             _gameState = GameState.Game;
             _tick = new Timer(_player.Tick, null, 10, 1000 / 24);
+
+            _lives = 3;
+            _points = 0;
+
+            _level.VehicleHit += RemoveLife;
+            _level.LitterPickedUp += AddPoints;
         }
 
         private void LoadQuiz()
@@ -178,7 +218,6 @@ namespace Hudson_Game
                     }*/
 
                     _level.Update(gameTime, Keyboard.GetState());
-                    //_camera.Update(gameTime);
 
                     base.Update(gameTime);
                     break;
@@ -214,22 +253,35 @@ namespace Hudson_Game
                 case GameState.Game:
                     _spriteBatch.Begin();
                     _spriteBatch.Draw(_level.Texture,
-                        new Vector2(_graphics.PreferredBackBufferWidth / 2f - _camera.Position.X - _level.PlayZone.Left,
-                            _graphics.PreferredBackBufferHeight / 2f - _camera.Position.Y - _level.PlayZone.Top));
+                        new Vector2((int) Math.Round(_graphics.PreferredBackBufferWidth / 2f - _camera.Position.X - _level.PlayZone.Left),
+                                    (int) Math.Round(_graphics.PreferredBackBufferHeight / 2f - _camera.Position.Y - _level.PlayZone.Top)));
                     if (_level.EnvironmentObjects != null)
                     {
                         foreach (var environmentObject in _level.EnvironmentObjects)
                         {
-                            _spriteBatch.Draw(environmentObject.Texture,
-                                new Vector2(
-                                    _graphics.PreferredBackBufferWidth / 2f + environmentObject.Position.X - _camera.Position.X,
-                                    _graphics.PreferredBackBufferHeight / 2f + environmentObject.Position.Y -
-                                    _camera.Position.Y));
+                            _spriteBatch.Draw(environmentObject.Texture, new Vector2(
+                                    (int) Math.Round(_graphics.PreferredBackBufferWidth / 2f + environmentObject.Position.X - _camera.Position.X),
+                                    (int) Math.Round(_graphics.PreferredBackBufferHeight / 2f + environmentObject.Position.Y - _camera.Position.Y)));
                         }
                     }
+                    foreach (var vehicle in _level.VehicleLanes[0].VehicleObjects)
+                    {
+                        _spriteBatch.Draw(vehicle.Texture, new Vector2(
+                            (int) Math.Round(_graphics.PreferredBackBufferWidth / 2f + vehicle.Position.X - _camera.Position.X),
+                            (int) Math.Round(_graphics.PreferredBackBufferHeight / 2f + vehicle.Position.Y) - _camera.Position.Y));
+                    }
                     _spriteBatch.Draw(_player.CurrentFrame,
-                        new Vector2(_graphics.PreferredBackBufferWidth / 2f + _player.Position.X - _camera.Position.X,
-                            _graphics.PreferredBackBufferHeight / 2f + _player.Position.Y - _camera.Position.Y));
+                        new Vector2((int) Math.Round(_graphics.PreferredBackBufferWidth / 2f + _player.Position.X - _camera.Position.X),
+                                    (int) Math.Round(_graphics.PreferredBackBufferHeight / 2f + _player.Position.Y - _camera.Position.Y)));
+                    _spriteBatch.DrawString(_spriteFont, new StringBuilder(_lives.ToString()), Vector2.Zero, Color.Red);
+                    _spriteBatch.DrawString(_spriteFont, new StringBuilder(_points.ToString()), new Vector2(300, 0), Color.Blue);
+                    foreach (var litter in _level.LitterList)
+                    {
+                        _spriteBatch.Draw(litter.Texture, new Vector2(
+                            (int) Math.Round(_graphics.PreferredBackBufferWidth / 2f + litter.Position.X - _camera.Position.X),
+                            (int) Math.Round(_graphics.PreferredBackBufferHeight / 2f + litter.Position.Y) - _camera.Position.Y));
+                    }
+
                     _spriteBatch.End();
                     break;
                 
@@ -246,9 +298,23 @@ namespace Hudson_Game
             base.Draw(gameTime);
         }
 
-        protected virtual void OnContentLoaded()
+        private void OnContentLoaded()
         {
             ContentLoaded?.Invoke(this, EventArgs.Empty);
+        }
+
+        private void RemoveLife(object sender, EventArgs e)
+        {
+            _lives--;
+            if (_lives <= 0)
+            {
+                _level.RespawnEnabled = false;
+            }
+        }
+
+        private void AddPoints(object sender, PickUpEventArgs e)
+        {
+            _points += e.Points;
         }
     }
 }

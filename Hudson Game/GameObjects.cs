@@ -1,4 +1,9 @@
 using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Dynamic;
+using System.Linq;
+using System.Timers;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework.Input;
@@ -14,24 +19,52 @@ namespace Hudson_Game
             public Player Player { get; }
             public Camera Camera { get; }
             public EnvironmentObject[] EnvironmentObjects { get; }
+            public VehicleLane[] VehicleLanes { get; }
+            public List<Litter> LitterList { get; private set; }
+            
+            public bool InvincibilityFrames { get; private set; }
+            public float InvincibilityTime => (float) _invincibilityStopwatch.Elapsed.TotalSeconds;
+
+            public bool RespawnEnabled
+            {
+                get => Player.RespawnEnabled;
+                set => Player.RespawnEnabled = value;
+            }
 
             public event CollisionEventHandler Collided;
+            public event VehicleHitEventHandler VehicleHit;
+            public event PickUpEventHandler LitterPickedUp;
 
             private Vector2 _lastValidPlayerPosition;
             private Vector2 _lastValidCameraPosition;
 
-            public Level(Texture2D texture, Rectangle playZone, Player player, Camera camera, EnvironmentObject[] environmentObjects)
+            private readonly Stopwatch _invincibilityStopwatch;
+            private readonly float _invincibilityTime;
+
+            private bool _disableCollisions;
+
+            private bool _stick;
+            private Vector2 _stickPosition;
+            private VehicleObject _stickVehicle;
+
+            public Level(Texture2D texture, Rectangle playZone, Player player, Camera camera, EnvironmentObject[] environmentObjects, VehicleLane[] vehicleLanes, Litter[] litter, float invincibilityTime)
             {
                 Texture = texture;
                 PlayZone = playZone;
                 Player = player;
                 Camera = camera;
                 EnvironmentObjects = environmentObjects;
-                
+                VehicleLanes = vehicleLanes;
+                LitterList = litter.ToList();
+                _invincibilityTime = invincibilityTime;
+
                 Player.SetLevel(this);
+                _invincibilityStopwatch = new Stopwatch();
 
                 _lastValidPlayerPosition = Player.Position;
                 _lastValidCameraPosition = Camera.Position;
+
+                RespawnEnabled = true;
             }
 
             public void Update(GameTime gameTime, KeyboardState keyboardState)
@@ -39,46 +72,177 @@ namespace Hudson_Game
                 var collided = false;
                 
                 Player.Update(gameTime, keyboardState);
-
-                if (Player.Position.X + Player.Hitbox.Right > PlayZone.Width ||
-                    Player.Position.X + Player.Hitbox.Left < 0 ||
-                    Player.Position.Y + Player.Hitbox.Bottom  > PlayZone.Height ||
-                    Player.Position.Y + Player.Hitbox.Top < 0)
+                foreach (var vehicleLane in VehicleLanes)
                 {
-                    collided = true;
-                    OnCollision(_lastValidPlayerPosition);
+                    vehicleLane.Update(gameTime);
                 }
-                
-                else if (EnvironmentObjects != null)
+
+                if (!_disableCollisions) // Collisions
                 {
-                    foreach (var environmentObject in EnvironmentObjects)
+                    if (Player.Position.X + Player.Hitbox.Right > PlayZone.Width ||
+                        Player.Position.X + Player.Hitbox.Left < 0 ||
+                        Player.Position.Y + Player.Hitbox.Bottom > PlayZone.Height ||
+                        Player.Position.Y + Player.Hitbox.Top < 0)
                     {
-                        if (environmentObject.CollisionEnabled &&
-                            new Rectangle((int) (environmentObject.Position.X + environmentObject.Hitbox.X),
-                            (int) (environmentObject.Position.Y + environmentObject.Hitbox.Y),
-                            environmentObject.Hitbox.Width, environmentObject.Hitbox.Height).Intersects(
-                            new Rectangle((int) (Player.Position.X + Player.Hitbox.X),
-                                (int) (Player.Position.Y + Player.Hitbox.Y),
-                                Player.Hitbox.Width, Player.Hitbox.Height)))
+                        collided = true;
+                        OnCollision(_lastValidPlayerPosition);
+                    }
+
+                    else if (EnvironmentObjects != null)
+                    {
+                        foreach (var environmentObject in EnvironmentObjects)
                         {
-                            collided = true;
-                            OnCollision(_lastValidPlayerPosition);
-                            break;
+                            if (environmentObject.CollisionEnabled &&
+                                new Rectangle((int) (environmentObject.Position.X + environmentObject.Hitbox.X),
+                                    (int) (environmentObject.Position.Y + environmentObject.Hitbox.Y),
+                                    environmentObject.Hitbox.Width, environmentObject.Hitbox.Height).Intersects(
+                                    new Rectangle((int) (Player.Position.X + Player.Hitbox.X),
+                                        (int) (Player.Position.Y + Player.Hitbox.Y),
+                                        Player.Hitbox.Width, Player.Hitbox.Height)))
+                            {
+                                collided = true;
+                                OnCollision(_lastValidPlayerPosition);
+                                break;
+                            }
                         }
                     }
+
+                    foreach (var litter in LitterList.ToList())
+                    {
+                        if (new Rectangle((int) (litter.Position.X + litter.Hitbox.X),
+                                (int) (litter.Position.Y + litter.Hitbox.Y), litter.Hitbox.Width, litter.Hitbox.Height)
+                            .Intersects(new Rectangle((int) (Player.Position.X + Player.Hitbox.X),
+                                (int) (Player.Position.Y + Player.Hitbox.Y), Player.Hitbox.Width,
+                                Player.Hitbox.Height)))
+                        {
+                            litter.PickUp();
+                            OnLitterPickedUp(litter);
+                            LitterList.Remove(litter);
+                        }
+                    }
+
+                    if (!InvincibilityFrames)
+                    {
+                        foreach (var vehicleLane in VehicleLanes)
+                        {
+                            if (vehicleLane.VehicleObjects != null)
+                            {
+                                foreach (var vehicleObject in vehicleLane.VehicleObjects.ToList())
+                                {
+                                    if (new Rectangle((int) (vehicleObject.Position.X + vehicleObject.Hitbox.X),
+                                        (int) (vehicleObject.Position.Y + vehicleObject.Hitbox.Y),
+                                        vehicleObject.Hitbox.Width,
+                                        vehicleObject.Hitbox.Height).Intersects(new Rectangle(
+                                        (int) (Player.Position.X + Player.Hitbox.X),
+                                        (int) (Player.Position.Y + Player.Hitbox.Y),
+                                        Player.Hitbox.Width, Player.Hitbox.Height)))
+                                    {
+                                        Vector2 direction;
+                                        var pureDirection =
+                                            (Player.Position + new Vector2(Player.Hitbox.Center.X,
+                                                 Player.Hitbox.Center.Y)) -
+                                            (vehicleObject.Position + new Vector2(vehicleObject.Hitbox.Center.X,
+                                                 vehicleObject.Hitbox.Center.Y));
+
+                                        if (Math.Abs(pureDirection.X) > Math.Abs(pureDirection.Y))
+                                        {
+                                            direction = Vector2.UnitX * (pureDirection.X > 0 ? 1 : -1);
+                                        }
+                                        else
+                                        {
+                                            direction = Vector2.UnitY * (pureDirection.Y > 0 ? 1 : -1);
+                                        }
+
+                                        OnVehicleHit(direction, vehicleObject.HitType);
+
+                                        InvincibilityFrames = true;
+                                        _disableCollisions = true;
+                                        _invincibilityStopwatch.Reset();
+                                        _invincibilityStopwatch.Start();
+
+                                        Camera.CameraState = CameraState.Chase;
+                                        Player.StopChase += StopChaseCamera;
+
+                                        Player.Respawned += EnabledCollisions;
+
+                                        if (vehicleObject.HitType == HitType.Stick)
+                                        {
+                                            _stick = true;
+                                            _stickVehicle = vehicleObject;
+                                            _stickPosition = Player.Position - _stickVehicle.Position;
+                                            Player.Respawned += Unstick;
+                                        }
+
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (_stick)
+                {
+                    OnCollision(_stickVehicle.Position + _stickPosition);
+                }
+                
+                if (InvincibilityTime > _invincibilityTime)
+                {
+                    _invincibilityStopwatch.Stop();
+                    InvincibilityFrames = false;
                 }
 
                 if (!collided)
                 {
                     _lastValidPlayerPosition = Player.Position;
                 }
-                
+
                 Camera.Update(gameTime);
             }
 
             private void OnCollision(Vector2 lastValidPosition)
             {
                 Collided?.Invoke(this, new CollisionEventArgs(lastValidPosition));
+            }
+
+            private void OnVehicleHit(Vector2 direction, HitType hitType)
+            {
+                VehicleHit?.Invoke(this, new VehicleHitEventArgs(direction, hitType));
+            }
+
+            private void OnLitterPickedUp(Litter litter)
+            {
+                LitterPickedUp?.Invoke(this, new PickUpEventArgs(litter.Points));
+            }
+
+            private void StopChaseCamera(object sender, EventArgs e)
+            {
+                Camera.CameraState = CameraState.Smooth;
+                Camera.SmoothFactor = 0.03f;
+
+                Player.StopChase -= StopChaseCamera;
+                Player.Respawned += RespawnedCamera;
+            }
+
+            private void EnabledCollisions(object sender, EventArgs e)
+            {
+                _disableCollisions = false;
+                Player.Respawned -= EnabledCollisions;
+            }
+
+            private void RespawnedCamera(object sender, EventArgs e)
+            {
+                Camera.ChaseToLock();
+                Camera.ChaseFactor = 3f;
+                Camera.SmoothFactor = 10f;
+
+                Player.Respawned -= RespawnedCamera;
+            }
+
+            private void Unstick(object sender, EventArgs e)
+            {
+                _stick = false;
+                _stickVehicle = null;
             }
         }
 
@@ -98,11 +262,184 @@ namespace Hudson_Game
             }
         }
 
+        public struct Vehicle
+        {
+            public Texture2D Texture { get; }
+            public Rectangle Hitbox { get; }
+            public float Speed { get; }
+            public HitType HitType { get; }
+
+            public Vehicle(Texture2D texture, Rectangle hitbox, float speed, HitType hitType)
+            {
+                Texture = texture;
+                Hitbox = hitbox;
+                Speed = speed;
+                HitType = hitType;
+            }
+        }
+
+        public class VehicleLane
+        {
+            public List<VehicleObject> VehicleObjects { get; }
+
+            private readonly Vehicle _vehicle;
+            private readonly float _laneLevel;
+            private readonly float _spawnPoint;
+            private readonly float _despawnPoint;
+            private readonly float _minTimeDelay;
+            private readonly float _spawnWindow;
+
+            private readonly Random _random;
+            private readonly Timer _timer; // System.Timers.Timer
+
+            public VehicleLane(Vehicle vehicle, float laneLevel, float spawnPoint, float despawnPoint, float minTimeDelay, float spawnWindow)
+            {
+                if (despawnPoint - spawnPoint < 0)
+                {
+                    var data = new Color[vehicle.Texture.Width * vehicle.Texture.Height];
+                    vehicle.Texture.GetData(data);
+
+                    var newData = new Color[vehicle.Texture.Width * vehicle.Texture.Height];
+                    for (int i = 0; i < vehicle.Texture.Width * vehicle.Texture.Height; i++)
+                    {
+                        newData[vehicle.Texture.Width * vehicle.Texture.Height - i - 1] = data[i];
+                    }
+
+                    var texture = new Texture2D(vehicle.Texture.GraphicsDevice, vehicle.Texture.Width, vehicle.Texture.Height);
+                    texture.SetData(newData);
+
+                    var hitbox = new Rectangle(vehicle.Texture.Width - vehicle.Hitbox.Right, vehicle.Texture.Height - vehicle.Hitbox.Bottom, vehicle.Hitbox.Width, vehicle.Hitbox.Height);
+                    
+                    _vehicle = new Vehicle(texture, hitbox, vehicle.Speed, vehicle.HitType);
+                }
+                else
+                {
+                    _vehicle = vehicle;
+                }
+
+                _laneLevel = laneLevel;
+                _spawnPoint = spawnPoint;
+                _despawnPoint = despawnPoint;
+                _minTimeDelay = minTimeDelay;
+                _spawnWindow = spawnWindow;
+
+                _timer = new Timer {AutoReset = false};
+                _timer.Elapsed += Spawn;
+                
+                _random = new Random();
+                
+                VehicleObjects = new List<VehicleObject>();
+            }
+
+            public void BeginSpawning()
+            {
+                _timer.Interval = _random.NextDouble() * _spawnWindow + _minTimeDelay;
+                _timer.Enabled = true;
+            }
+
+            public void EndSpawning()
+            {
+                _timer.Enabled = false;
+            }
+
+            public void Update(GameTime gameTime)
+            {
+                foreach (var vehicleObject in VehicleObjects.ToList())
+                {
+                    vehicleObject.Update(gameTime);
+                }
+            }
+
+            private void Spawn(object sender, ElapsedEventArgs e)
+            {
+                var vehicle = new VehicleObject(_vehicle, new Vector2(_spawnPoint, _laneLevel), _despawnPoint);
+                vehicle.GoalReached += RemoveVehicle;
+                VehicleObjects.Add(vehicle);
+                
+                _timer.Interval = _random.NextDouble() * (_spawnWindow - _minTimeDelay) + _minTimeDelay;
+                _timer.Enabled = true;
+            }
+
+            private void RemoveVehicle(object sender, EventArgs e)
+            {
+                var vehicle = (VehicleObject) sender;
+
+                VehicleObjects.Remove(vehicle);
+                vehicle.GoalReached -= RemoveVehicle;
+            }
+        }
+
+        public class VehicleObject
+        {
+            public Texture2D Texture { get; }
+            public Vector2 Position { get; private set; }
+            public Rectangle Hitbox { get; }
+            public HitType HitType { get; }
+
+            private readonly float _speed;
+            private readonly float _goal;
+
+            public event EventHandler GoalReached;
+
+            public VehicleObject(Vehicle vehicle, Vector2 position, float goal)
+            {
+                _goal = goal;
+                Position = position;
+                HitType = vehicle.HitType;
+                _speed = vehicle.Speed * (goal - position.X > 0 ? 1 : -1);
+                Texture = vehicle.Texture;
+                Hitbox = vehicle.Hitbox;
+            }
+
+            public void Update(GameTime gameTime)
+            {
+                Position += new Vector2(_speed, 0) * (float) gameTime.ElapsedGameTime.TotalSeconds;
+                if (Position.X > _goal && _speed > 0 || Position.X < _goal && _speed < 0)
+                {
+                    OnGoalReached();
+                }
+            }
+
+            private void OnGoalReached()
+            {
+                GoalReached?.Invoke(this, EventArgs.Empty);
+            }
+        }
+        
+        public class Litter
+        {
+            public Texture2D Texture { get; }
+            public Rectangle Hitbox { get; }
+            public Vector2 Position { get; }
+            public int Points { get; }
+
+            public event PickUpEventHandler PickedUp;
+
+            public Litter(Texture2D texture, Rectangle hitbox, Vector2 position, int points)
+            {
+                Texture = texture;
+                Hitbox = hitbox;
+                Position = position;
+                Points = points;
+            }
+
+            public void PickUp()
+            {
+                OnPickedUp();
+            }
+
+            private void OnPickedUp()
+            {
+                PickedUp?.Invoke(this, (PickUpEventArgs) EventArgs.Empty);
+            }
+        }
+
         public class Player
         {
             public Vector2 Position { get; private set; }
             public Rectangle Hitbox => GetHitbox();
             public Texture2D CurrentFrame => GetFrame();
+            public bool RespawnEnabled { get; set; }
             
             private readonly Texture2D _standing;
             private readonly Texture2D _starting;
@@ -113,34 +450,54 @@ namespace Hudson_Game
             private readonly int _startingFrames;
             private readonly int _runningFrames;
             private readonly int _stoppingFrames;
+            private readonly int _knockbackFrames;
+            private readonly int _hitChaseFrames;
 
             private readonly float _runningSpeed;
             private readonly float _acceleration;
             private readonly float _deceleration;
+            private readonly float _knockbackSpeed;
+            private readonly float _knockbackDeceleration;
+
+            private readonly Vector2 _spawnPosition;
+            private readonly Rectangle _hitbox;
             
             private Vector2 _direction = -Vector2.UnitX;
             private float _speed; // Default 0 at initialisation
             private PlayerState _playerState = PlayerState.Standing;
-            private Rectangle _hitbox;
             private KeyboardState _keyboardState;
             private int _frame; // Default 0 at initialisation
             private int _delay; // Default 0 at initialisation
 
-            public Player(Texture2D standing, Texture2D starting, Texture2D running, Texture2D stopping, Texture2D hit, Rectangle hitbox, int startingFrames, int runningFrames, int stoppingFrames, float runningSpeed, Vector2 position)
+            public event EventHandler Respawned;
+            public event EventHandler StopChase;
+
+            public Player(Texture2D standing, Texture2D starting, Texture2D running, Texture2D stopping, Texture2D hit, Rectangle hitbox, int startingFrames, int runningFrames, int stoppingFrames, int knockbackFrames, int hitChaseFrames, float runningSpeed, float knockbackSpeed, Vector2 spawnPosition)
             {
                 _standing = standing;
                 _starting = starting;
                 _running = running;
                 _stopping = stopping;
                 _hit = hit;
+                
                 _hitbox = hitbox;
+                
                 _startingFrames = startingFrames;
                 _runningFrames = runningFrames;
                 _stoppingFrames = stoppingFrames;
+                _knockbackFrames = knockbackFrames;
+                _hitChaseFrames = hitChaseFrames;
+
                 _runningSpeed = runningSpeed;
                 _acceleration = runningSpeed / startingFrames;
                 _deceleration = runningSpeed / stoppingFrames;
-                Position = position;
+                _knockbackSpeed = knockbackSpeed;
+                _knockbackDeceleration = knockbackSpeed / knockbackFrames;
+
+                _spawnPosition = spawnPosition;
+                Position = spawnPosition;
+
+                RespawnEnabled = true;
             }
 
             public void Update(GameTime gameTime, KeyboardState keyboardState)
@@ -166,8 +523,29 @@ namespace Hudson_Game
                 {
                     moveVector = new Vector2(0, (s ? 1 : 0) - (w ? 1 : 0));
                 }
+
+                if (_playerState == PlayerState.Hit)
+                {
+                    if (_delay < _knockbackFrames - 1)
+                    {
+                        _delay++;
+                        _speed -= _knockbackDeceleration;
+                        if (_delay >= _hitChaseFrames)
+                        {
+                            OnStopChase();
+                        }
+                    }
+                    else if (RespawnEnabled)
+                    {
+                        _playerState = PlayerState.Standing;
+                        _frame = 0;
+                        _speed = 0;
+                        Position = _spawnPosition;
+                        OnRespawned();
+                    }
+                }
                 
-                if (_playerState == PlayerState.Stopping)
+                else if (_playerState == PlayerState.Stopping)
                 {
                     if (_frame < _stoppingFrames - 1)
                     {
@@ -255,12 +633,23 @@ namespace Hudson_Game
                 }
             }
 
+            private void OnStopChase()
+            {
+                StopChase?.Invoke(this, EventArgs.Empty);
+            }
+
+            private void OnRespawned()
+            {
+                Respawned?.Invoke(this, EventArgs.Empty);
+            }
+
             public void SetLevel(Level level)
             {
                 level.Collided += Collided;
+                level.VehicleHit += VehicleHit;
             }
 
-            public Texture2D GetFrame()
+            private Texture2D GetFrame()
             {
                 Texture2D activeSprite;
                 Texture2D texture;
@@ -281,6 +670,10 @@ namespace Hudson_Game
                     
                     case PlayerState.Stopping:
                         activeSprite = _stopping;
+                        break;
+
+                    case PlayerState.Hit:
+                        activeSprite = _hit;
                         break;
                     
                     default:
@@ -362,6 +755,22 @@ namespace Hudson_Game
             {
                 Position = e.LastValidPosition;
             }
+
+            private void VehicleHit(object sender, VehicleHitEventArgs e)
+            {
+                _playerState = PlayerState.Hit;
+                _frame = 0;
+                _delay = 0;
+                _direction = e.Direction;
+                if (e.HitType == HitType.Knockback)
+                {
+                    _speed = _knockbackSpeed;
+                }
+                else
+                {
+                    _speed = 0;
+                }
+            }
         }
 
         public class Camera
@@ -369,6 +778,15 @@ namespace Hudson_Game
             public Vector2 Position { get; set; }
             public CameraState CameraState { get; set; }
             public Player Target { get; set; }
+            public float ChaseFactor { get; set; } = 1;
+            public float SmoothFactor { get; set; } = 1;
+
+            private Vector2 _velocity;
+            private bool _chaseToLock;
+
+            public float Speed => _velocity.Length();
+
+            public event EventHandler LockedFromChase;
 
             public Camera()
             {
@@ -393,10 +811,62 @@ namespace Hudson_Game
 
             public void Update(GameTime gameTime)
             {
-                if (Target != null && CameraState == CameraState.Locked)
+                if (Target != null)
                 {
-                    Position = Target.Position + new Vector2(Target.Hitbox.Center.X, Target.Hitbox.Center.Y);
+                    var position = Target.Position + new Vector2(Target.Hitbox.Center.X, Target.Hitbox.Center.Y);
+                    
+                    if (CameraState == CameraState.Locked)
+                    {
+                        var newPosition = position;
+                        _velocity = (newPosition - Position) / (float) gameTime.ElapsedGameTime.TotalSeconds;
+                        Position = newPosition;
+                    }
+                    else if (CameraState == CameraState.Chase)
+                    {
+                        var direction = (position - Position);
+                        var distance = direction.Length();
+                        direction.Normalize();
+
+                        if (distance < 1f)
+                        {
+                            if (_chaseToLock)
+                            {
+                                CameraState = CameraState.Locked;
+                                _chaseToLock = false;
+                                OnLockedFromChase();
+                            }
+                            else
+                            {
+                                _velocity = Vector2.Zero;
+                                Position = position;
+                            }
+                        }
+                        else
+                        {
+                            distance /= SmoothFactor * ChaseFactor * 10000;
+                            _velocity = direction * (float) (ChaseFactor * 10000 * Math.Sqrt(distance * (distance + 2)) / (distance + 1));
+                            Position += _velocity * (float) gameTime.ElapsedGameTime.TotalSeconds;
+                        }
+                    }
                 }
+
+                if (CameraState == CameraState.Smooth)
+                {
+                    _velocity *= (float) Math.Pow(Math.Exp(SmoothFactor) / (Math.Exp(SmoothFactor) + 50), gameTime.ElapsedGameTime.TotalSeconds);
+
+                    Position += _velocity * (float) gameTime.ElapsedGameTime.TotalSeconds;
+                }
+            }
+
+            public void ChaseToLock()
+            {
+                CameraState = CameraState.Chase;
+                _chaseToLock = true;
+            }
+
+            private void OnLockedFromChase()
+            {
+                LockedFromChase?.Invoke(this, EventArgs.Empty);
             }
         }
         
@@ -410,19 +880,27 @@ namespace Hudson_Game
             }
         }
 
-        public enum PlayerState
+        private enum PlayerState
         {
             Standing = 0,
             Starting = 1,
             Running = 2,
-            Stopping = 3
+            Stopping = 3,
+            Hit = 4
+        }
+
+        public enum HitType
+        {
+            Knockback = 0,
+            Stick = 1
         }
 
         public enum CameraState
         {
             Free = 0,
             Locked = 1,
-            Chase = 2
+            Chase = 2,
+            Smooth = 3
         }
 
         public enum GameState
@@ -443,5 +921,31 @@ namespace Hudson_Game
         }
 
         public delegate void CollisionEventHandler(object sender, CollisionEventArgs e);
+
+        public class VehicleHitEventArgs : EventArgs
+        {
+            public Vector2 Direction { get; }
+            public HitType HitType { get; }
+
+            public VehicleHitEventArgs(Vector2 direction, HitType hitType)
+            {
+                Direction = direction;
+                HitType = hitType;
+            }
+        }
+
+        public delegate void VehicleHitEventHandler(object sender, VehicleHitEventArgs e);
+
+        public class PickUpEventArgs : EventArgs
+        {
+            public int Points { get; }
+
+            public PickUpEventArgs(int points)
+            {
+                Points = points;
+            }
+        }
+
+        public delegate void PickUpEventHandler(object sender, PickUpEventArgs e);
     }
 }
