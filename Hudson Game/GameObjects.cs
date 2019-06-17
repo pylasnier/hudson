@@ -1,12 +1,15 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Diagnostics.SymbolStore;
 using System.Dynamic;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Timers;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework.Input;
+using System.Data.SQLite;
 
 namespace Hudson_Game
 {
@@ -33,7 +36,7 @@ namespace Hudson_Game
 
             public event CollisionEventHandler Collided;
             public event VehicleHitEventHandler VehicleHit;
-            public event PickUpEventHandler LitterPickedUp;
+            public event PointsEventHandler LitterPickedUp;
 
             private Vector2 _lastValidPlayerPosition;
             private Vector2 _lastValidCameraPosition;
@@ -161,6 +164,8 @@ namespace Hudson_Game
                                         _invincibilityStopwatch.Start();
 
                                         Camera.CameraState = CameraState.Chase;
+                                        Camera.ChaseFactor = 2f;
+                                        Camera.SmoothFactor = 5f;
                                         Player.StopChase += StopChaseCamera;
 
                                         Player.Respawned += EnabledCollisions;
@@ -212,7 +217,7 @@ namespace Hudson_Game
 
             private void OnLitterPickedUp(Litter litter)
             {
-                LitterPickedUp?.Invoke(this, new PickUpEventArgs(litter.Points));
+                LitterPickedUp?.Invoke(this, new PointsEventArgs(litter.Points));
             }
 
             private void StopChaseCamera(object sender, EventArgs e)
@@ -224,12 +229,6 @@ namespace Hudson_Game
                 Player.Respawned += RespawnedCamera;
             }
 
-            private void EnabledCollisions(object sender, EventArgs e)
-            {
-                _disableCollisions = false;
-                Player.Respawned -= EnabledCollisions;
-            }
-
             private void RespawnedCamera(object sender, EventArgs e)
             {
                 Camera.ChaseToLock();
@@ -237,6 +236,12 @@ namespace Hudson_Game
                 Camera.SmoothFactor = 10f;
 
                 Player.Respawned -= RespawnedCamera;
+            }
+
+            private void EnabledCollisions(object sender, EventArgs e)
+            {
+                _disableCollisions = false;
+                Player.Respawned -= EnabledCollisions;
             }
 
             private void Unstick(object sender, EventArgs e)
@@ -413,7 +418,7 @@ namespace Hudson_Game
             public Vector2 Position { get; }
             public int Points { get; }
 
-            public event PickUpEventHandler PickedUp;
+            public event PointsEventHandler PickedUp;
 
             public Litter(Texture2D texture, Rectangle hitbox, Vector2 position, int points)
             {
@@ -430,7 +435,7 @@ namespace Hudson_Game
 
             private void OnPickedUp()
             {
-                PickedUp?.Invoke(this, (PickUpEventArgs) EventArgs.Empty);
+                PickedUp?.Invoke(this, (PointsEventArgs) EventArgs.Empty);
             }
         }
 
@@ -869,14 +874,217 @@ namespace Hudson_Game
                 LockedFromChase?.Invoke(this, EventArgs.Empty);
             }
         }
-        
+
         public class Quiz
         {
-            public Texture2D Texture { get; }
+            public Color BackgroundColor { get; }
+            public string QuestionText { get; private set; }
+            public Vector2 QuestionPosition { get; }
+            public AnswerBox[] AnswerBoxes { get; }
 
-            public Quiz(Texture2D texture)
+            private readonly Stopwatch _answerDelay;
+            private readonly Random _random;
+            
+            private bool _canAnswer;
+            private List<QuestionAndAnswers> _questionsAndAnswers;
+            private QuestionAndAnswers _activeQuestionAndAnswers;
+
+            public event EventHandler QuizOver;
+            public event PointsEventHandler CorrectlyAnswered;
+
+            public Quiz(Color backgroundColor, Texture2D answerBoxIdle, Texture2D answerBoxHover, Texture2D answerBoxClick, Vector2 questionPosition, Rectangle answerSpace, int difficulty)
             {
-                Texture = texture;
+                BackgroundColor = backgroundColor;
+                QuestionPosition = questionPosition;
+                QuestionText = "Question";
+
+                AnswerBoxes = new AnswerBox[4];
+                var rectangles = new Rectangle[4];
+                rectangles[0] = new Rectangle(answerSpace.Location, new Point(answerSpace.Width / 2, answerSpace.Height / 2));
+                rectangles[1] = new Rectangle(new Point(answerSpace.X + answerSpace.Width / 2, answerSpace.Y), new Point(answerSpace.Width / 2, answerSpace.Height / 2));
+                rectangles[2] = new Rectangle(new Point(answerSpace.X, answerSpace.Y + answerSpace.Height / 2), new Point(answerSpace.Width / 2, answerSpace.Height / 2));
+                rectangles[3] = new Rectangle(new Point(answerSpace.X + answerSpace.Width / 2, answerSpace.Y + answerSpace.Height / 2), new Point(answerSpace.Width / 2, answerSpace.Height / 2));
+
+                for (int i = 0; i < 4; i++)
+                {
+                    var questionBox = new AnswerBox(answerBoxIdle, answerBoxHover, answerBoxClick,
+                        new Vector2(rectangles[i].Center.X - answerBoxIdle.Bounds.Center.X,
+                            rectangles[i].Center.Y - answerBoxIdle.Bounds.Center.Y));
+                    AnswerBoxes[i] = questionBox;
+                }
+                
+                _answerDelay = new Stopwatch();
+                _canAnswer = true;
+                _questionsAndAnswers = new List<QuestionAndAnswers>();
+
+                var connection = new SQLiteConnection("Data Source=Content/Data;Version=3");
+                connection.Open();
+
+                var read = "SELECT * FROM Questions WHERE Difficulty = @difficulty";
+                var command = new SQLiteCommand(read, connection);
+                command.Parameters.AddWithValue("@difficulty", difficulty);
+
+                var reader = command.ExecuteReader();
+                while (reader.Read())
+                {
+                    _questionsAndAnswers.Add(new QuestionAndAnswers((string) reader["Question"], (string) reader["Answer1"],
+                        (string) reader["Answer2"], (string) reader["Answer3"], (string) reader["Answer4"], (int)(long) reader["CorrectAnswer"],
+                        (int)(long) reader["Points"]));
+                }
+                
+                _random = new Random();
+
+                if (_questionsAndAnswers.Any())
+                {
+                    var random = _random.Next(_questionsAndAnswers.Count);
+                    UpdateQuiz(_questionsAndAnswers[random]);
+                    _questionsAndAnswers.RemoveAt(random);
+                }
+                else
+                {
+                    OnQuizOver();
+                }
+            }
+
+            public void Update(GameTime gameTime, MouseState mouseState)
+            {
+                if (_canAnswer)
+                {
+                    for (int i = 0; i < 4; i++)
+                    {
+                        if (new Rectangle(new Point((int) AnswerBoxes[i].Position.X, (int) AnswerBoxes[i].Position.Y),
+                            AnswerBoxes[i].Texture.Bounds.Size).Contains(mouseState.Position))
+                        {
+                            if (mouseState.LeftButton == ButtonState.Pressed)
+                            {
+                                AnswerBoxes[i].AnswerBoxState = AnswerBoxState.Click;
+                            }
+                            else if (AnswerBoxes[i].AnswerBoxState == AnswerBoxState.Click)
+                            {
+                                if (i == _activeQuestionAndAnswers.CorrectAnswerIndex)
+                                {
+                                    QuestionText = "Correct!";
+                                    OnCorrectlyAnswered(_activeQuestionAndAnswers);
+                                }
+                                else
+                                {
+                                    QuestionText = "Incorrect!";
+                                }
+                                
+                                AnswerBoxes[i].AnswerBoxState = AnswerBoxState.Hover;
+                                
+                                _canAnswer = false;
+                                _answerDelay.Reset();
+                                _answerDelay.Start();
+                            }
+                            else
+                            {
+                                AnswerBoxes[i].AnswerBoxState = AnswerBoxState.Hover;
+                            }
+                        }
+                        else
+                        {
+                            AnswerBoxes[i].AnswerBoxState = AnswerBoxState.Idle;
+                        }
+                    }
+                }
+                else if (_answerDelay.IsRunning && _answerDelay.Elapsed.TotalSeconds > 1)
+                {
+                    if (_questionsAndAnswers.Any())
+                    {
+                        var random = _random.Next(_questionsAndAnswers.Count);
+                        UpdateQuiz(_questionsAndAnswers[random]);
+                        _questionsAndAnswers.RemoveAt(random);
+                        _canAnswer = true;
+                    }
+                    else
+                    {
+                        OnQuizOver();
+                    }
+                }
+            }
+
+            private void UpdateQuiz(QuestionAndAnswers questionAndAnswers)
+            {
+                _activeQuestionAndAnswers = questionAndAnswers;
+                
+                QuestionText = questionAndAnswers.Question;
+                for (int i = 0; i < 4; i++)
+                {
+                    AnswerBoxes[i].Text = questionAndAnswers.Answers[i];
+                }
+            }
+
+            private void OnQuizOver()
+            {
+                QuizOver?.Invoke(this, EventArgs.Empty);
+            }
+
+            private void OnCorrectlyAnswered(QuestionAndAnswers questionAndAnswers)
+            {
+                CorrectlyAnswered?.Invoke(this, new PointsEventArgs(questionAndAnswers.Points));
+            }
+
+            private struct QuestionAndAnswers
+            {
+                public string Question { get; }
+                public string[] Answers { get; }
+                public int CorrectAnswerIndex { get; }
+                public int Points { get; }
+
+                public QuestionAndAnswers(string question, string answer1, string answer2, string answer3, string answer4, int correctAnswerIndex, int points)
+                {
+                    Question = question;
+                    Answers = new[] {answer1, answer2, answer3, answer4};
+                    CorrectAnswerIndex = correctAnswerIndex;
+                    Points = points;
+                }
+            }
+        }
+
+        public class AnswerBox
+        {
+            public AnswerBoxState AnswerBoxState { get; set; }
+            public Texture2D Texture => GetTexture();
+            public Vector2 Position { get; }
+            public string Text { get; set; }
+
+            private readonly Texture2D _idleTexture;
+            private readonly Texture2D _hoverTexture;
+            private readonly Texture2D _clickTexture;
+
+            public AnswerBox(Texture2D idleTexture, Texture2D hoverTexture, Texture2D clickTexture, Vector2 position)
+            {
+                _idleTexture = idleTexture;
+                _hoverTexture = hoverTexture;
+                _clickTexture = clickTexture;
+                Position = position;
+                AnswerBoxState = AnswerBoxState.Idle;
+            }
+
+            private Texture2D GetTexture()
+            {
+                Texture2D texture;
+                
+                switch (AnswerBoxState)
+                {
+                    case AnswerBoxState.Idle:
+                        texture = _idleTexture;
+                        break;
+                    
+                    case AnswerBoxState.Hover:
+                        texture = _hoverTexture;
+                        break;
+                    
+                    case AnswerBoxState.Click:
+                        texture = _clickTexture;
+                        break;
+                    
+                    default:
+                        throw new ArgumentOutOfRangeException();
+                }
+
+                return texture;
             }
         }
 
@@ -910,6 +1118,13 @@ namespace Hudson_Game
             Quiz = 2
         }
 
+        public enum AnswerBoxState
+        {
+            Idle = 0,
+            Hover = 1,
+            Click = 2
+        }
+
         public class CollisionEventArgs : EventArgs
         {
             public Vector2 LastValidPosition { get; }
@@ -936,16 +1151,16 @@ namespace Hudson_Game
 
         public delegate void VehicleHitEventHandler(object sender, VehicleHitEventArgs e);
 
-        public class PickUpEventArgs : EventArgs
+        public class PointsEventArgs : EventArgs
         {
             public int Points { get; }
 
-            public PickUpEventArgs(int points)
+            public PointsEventArgs(int points)
             {
                 Points = points;
             }
         }
 
-        public delegate void PickUpEventHandler(object sender, PickUpEventArgs e);
+        public delegate void PointsEventHandler(object sender, PointsEventArgs e);
     }
 }

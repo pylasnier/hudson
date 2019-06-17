@@ -1,12 +1,13 @@
 ﻿using System;
 using System.Net.Mime;
 using System.Text;
-using System.Threading;
+using System.Timers;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework.Input;
 
 using static Hudson_Game.GameObjects;
+using Timer = System.Threading.Timer;
 
 namespace Hudson_Game
 {
@@ -58,13 +59,12 @@ namespace Hudson_Game
         private void InitialLoad(object sender, EventArgs e)
         {
             ContentLoaded -= InitialLoad;
-            LoadLevel();
+            //LoadLevel();
+            LoadQuiz();
         }
 
         private void LoadLevel()
         {
-            _spriteFont = Content.Load<SpriteFont>("File");
-            
             var standing = Content.Load<Texture2D>("Hudson Sprites/Standing_scaled");
             var running = Content.Load<Texture2D>("Hudson Sprites/Running");
             var starting = Content.Load <Texture2D>("Hudson Sprites/Starting");
@@ -94,7 +94,7 @@ namespace Hudson_Game
             pretendCar.SetData(data);
             
             var vehicleLane =
-                new VehicleLane(new Vehicle(pretendCar, new Rectangle(0, 0, 100, 50), 10000, HitType.Stick), 300, 1500,
+                new VehicleLane(new Vehicle(pretendCar, new Rectangle(0, 0, 100, 50), 300, HitType.Knockback), 300, 1500,
                     -500, 3000, 1000);
             
             data = new Color[20 * 20];
@@ -123,21 +123,28 @@ namespace Hudson_Game
 
             _level.VehicleHit += RemoveLife;
             _level.LitterPickedUp += AddPoints;
+
+            IsMouseVisible = false;
         }
 
         private void LoadQuiz()
         {
-            var data = new Color[500 * 500];
-            for (int i = 0; i < 500 * 500; i++)
-            {
-                data[i] = Color.IndianRed;
-            }
-            var texture = new Texture2D(GraphicsDevice, 500, 500);
-            texture.SetData(data);
+            var idle = Content.Load<Texture2D>("Quiz Textures/idle");
+            var hover = Content.Load<Texture2D>("Quiz Textures/hover");
+            var click = Content.Load<Texture2D>("Quiz Textures/click");
             
-            _quiz = new Quiz(texture);
+             _quiz = new Quiz(Color.LimeGreen, idle, hover, click, Vector2.Zero, new Rectangle(50, 20, 984, 668), 1);
 
             _gameState = GameState.Quiz;
+
+            IsMouseVisible = true;
+            _points = 0;
+            _quiz.CorrectlyAnswered += AddPoints;
+        }
+
+        private void LoadLogin()
+        {
+            
         }
 
         protected override void Initialize()
@@ -150,6 +157,8 @@ namespace Hudson_Game
         protected override void LoadContent()
         {
             _spriteBatch = new SpriteBatch(GraphicsDevice);
+            
+            _spriteFont = Content.Load<SpriteFont>("File");
 
             // TODO: use this.Content to load your game content here
 
@@ -223,16 +232,7 @@ namespace Hudson_Game
                     break;
                 
                 case GameState.Quiz:
-
-                    if (!_plusKeyDownRecorded && Keyboard.GetState().IsKeyDown(Keys.OemPlus))
-                    {
-                        _plusKeyDownRecorded = true;
-                        LoadLevel();
-                    }
-                    else if (_plusKeyDownRecorded && Keyboard.GetState().IsKeyUp(Keys.OemPlus))
-                    {
-                        _plusKeyDownRecorded = false;
-                    }
+                    _quiz.Update(gameTime, Mouse.GetState());
                     break;
                 
                 default:
@@ -242,15 +242,19 @@ namespace Hudson_Game
 
         protected override void Draw(GameTime gameTime)
         {
-            GraphicsDevice.Clear(Color.CornflowerBlue);
-
             // TODO: Add your drawing code here
             switch (_gameState)
             {
                 case GameState.Loading:
+                    
+                    GraphicsDevice.Clear(Color.CornflowerBlue);
+
+
                     break;
 
                 case GameState.Game:
+                    GraphicsDevice.Clear(Color.CornflowerBlue);
+                    
                     _spriteBatch.Begin();
                     _spriteBatch.Draw(_level.Texture,
                         new Vector2((int) Math.Round(_graphics.PreferredBackBufferWidth / 2f - _camera.Position.X - _level.PlayZone.Left),
@@ -286,8 +290,16 @@ namespace Hudson_Game
                     break;
                 
                 case GameState.Quiz:
+                    GraphicsDevice.Clear(_quiz.BackgroundColor);
+                    
                     _spriteBatch.Begin();
-                    _spriteBatch.Draw(_quiz.Texture, Vector2.Zero);
+                    _spriteBatch.DrawString(_spriteFont, _quiz.QuestionText, _quiz.QuestionPosition, Color.Black);
+                    foreach (var answerBox in _quiz.AnswerBoxes)
+                    {
+                        _spriteBatch.Draw(answerBox.Texture, answerBox.Position);
+                        _spriteBatch.DrawString(_spriteFont, answerBox.Text, answerBox.Position, Color.Black);
+                    }
+                    _spriteBatch.DrawString(_spriteFont, new StringBuilder(_points.ToString()), new Vector2(300, 0), Color.Blue);
                     _spriteBatch.End();
                     break;
                 
@@ -309,12 +321,22 @@ namespace Hudson_Game
             if (_lives <= 0)
             {
                 _level.RespawnEnabled = false;
+                var wait = new System.Timers.Timer(3000);
+                wait.AutoReset = false;
+                wait.Enabled = true;
+
+                wait.Elapsed += BeginQuizLoad;
             }
         }
 
-        private void AddPoints(object sender, PickUpEventArgs e)
+        private void AddPoints(object sender, PointsEventArgs e)
         {
             _points += e.Points;
+        }
+
+        private void BeginQuizLoad(object sender, ElapsedEventArgs e)
+        {
+            LoadQuiz();
         }
     }
 }

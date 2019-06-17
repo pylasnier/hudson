@@ -80,6 +80,9 @@
 /processorParam:TextureFormat=Color
 /build:Hudson Sprites/Stopping.png
 
+#begin minecraft.ttf
+/copy:minecraft.ttf
+
 #begin playzone.png
 /importer:TextureImporter
 /processor:TextureProcessor
@@ -91,4 +94,40 @@
 /processorParam:MakeSquare=False
 /processorParam:TextureFormat=Color
 /build:playzone.png
+
+#begin Quiz Textures/click.png
+/importer:TextureImporter
+/processor:TextureProcessor
+/processorParam:ColorKeyColor=255,0,255,255
+/processorParam:ColorKeyEnabled=True
+/processorParam:GenerateMipmaps=False
+/processorParam:PremultiplyAlpha=True
+/processorParam:ResizeToPowerOfTwo=False
+/processorParam:MakeSquare=False
+/processorParam:TextureFormat=Color
+/build:Quiz Textures/click.png
+
+#begin Quiz Textures/hover.png
+/importer:TextureImporter
+/processor:TextureProcessor
+/processorParam:ColorKeyColor=255,0,255,255
+/processorParam:ColorKeyEnabled=True
+/processorParam:GenerateMipmaps=False
+/processorParam:PremultiplyAlpha=True
+/processorParam:ResizeToPowerOfTwo=False
+/processorParam:MakeSquare=False
+/processorParam:TextureFormat=Color
+/build:Quiz Textures/hover.png
+
+#begin Quiz Textures/idle.png
+/importer:TextureImporter
+/processor:TextureProcessor
+/processorParam:ColorKeyColor=255,0,255,255
+/processorParam:ColorKeyEnabled=True
+/processorParam:GenerateMipmaps=False
+/processorParam:PremultiplyAlpha=True
+/processorParam:ResizeToPowerOfTwo=False
+/processorParam:MakeSquare=False
+/processorParam:TextureFormat=Color
+/build:Quiz Textures/idle.png
 
